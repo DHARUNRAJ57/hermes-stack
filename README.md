@@ -1,9 +1,10 @@
 # Hermes + Cognee stack
 
-One folder, two services, one compose file:
+One folder, four services, one compose file:
 
 - **Cognee (`cognee-mcp`)**: shared memory. Its MCP server offers `remember`, `recall` and `forget`.
 - **Hermes Agent (`hermes`)**: the official Docker image. Its API runs on `127.0.0.1:8642`. Hermes reads and writes the same Cognee memory.
+- **Cognee API (`cognee`) and web page (`frontend`)**: Cognee's full API on `127.0.0.1:8000`, and its web page on `127.0.0.1:8002`. The memory server uses this API, so the web page shows the same memory that Hermes uses.
 
 ```
 Hermes Agent  --MCP-->  cognee-mcp (shared memory)  <--MCP--  any MCP client on this PC
@@ -104,6 +105,15 @@ python smoke_test.py --chat
 python smoke_test.py --memory
 ```
 
+## Cognee web page
+
+Open **http://127.0.0.1:8002** in your browser. It's Cognee's own web page. It shows the same memory that Hermes and the memory tools use. Cognee's API is also at **http://127.0.0.1:8000** (its interactive API page is at `/docs`).
+
+The page needs no login in this setup, because Cognee's login is off for this single-user stack. Use it on this PC only. Do not publish ports 8002 or 8000 to your network.
+
+Services and memory: `cognee-mcp` now stores memory through the Cognee API (`API_URL` in `compose.yaml`). Memory saved before this change stays in the old volume `hermes-stack_cognee_storage`, and the new memory lives in `hermes-stack_cognee_api_storage`.
+
+Embeddings: `nvidia/nemotron-3-embed-1b` was retired by NVIDIA on 2026-11-23, so the stack uses `nvidia/nemotron-3.5-embed-1b` (2048 dimensions). NVIDIA requires an input type for this model, so `.env` sets `EMBEDDING_INPUT_TYPE=passage`. Cognee uses that one setting for both stored notes and search queries.
 ## Web dashboard
 
 Hermes has a web dashboard, and this stack runs it on this PC only.
@@ -141,6 +151,8 @@ docker compose down                   # stop (keeps the memory and Hermes settin
 | Vector size or dimension error after changing `EMBEDDING_DIMENSIONS` | Memory saved with the old size cannot be used with the new one. Ask before resetting, because a reset deletes the shared memory. |
 | `Setting dimensions is not supported` when saving memory | The embedding model name must start with `nvidia_nim/` (set in `.env` as in the template). Then run `docker compose up -d`. |
 | Dashboard: `Username and password required` or redirects to `/login` | Use `hermes-admin` and the password in `.env` (`HERMES_DASHBOARD_PASSWORD`). |
+| `Embedding connection test timed out` or `410 Gone` from NVIDIA | The embedding model was retired. Set `EMBEDDING_MODEL` in `.env` to a current NVIDIA embedding model (for example `nvidia_nim/nvidia/nemotron-3.5-embed-1b`), then run `docker compose up -d`. |
+| The web page loads but cannot reach the API | The API allows only listed page addresses. Check `CORS_ALLOWED_ORIGINS` in `compose.yaml` (it lists `http://127.0.0.1:8002`), then run `docker compose up -d`. |
 | `hermes mcp test shared-memory` fails | Check that `cognee-mcp` is healthy (`docker compose ps`), then repeat step 4. |
 
 ## Security

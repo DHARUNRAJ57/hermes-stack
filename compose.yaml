@@ -23,6 +23,8 @@ services:
     environment:
       ENV: local
       BIND_ADDRESS: "0.0.0.0"
+      # Lets the web page on port 8002 call this API from the browser.
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8002,http://localhost:8002"
       HTTP_PORT: "8000"
       # Single-user, private setup. Both flags must be false together.
       REQUIRE_AUTHENTICATION: "false"
@@ -40,7 +42,7 @@ services:
       retries: 3
       start_period: 180s
 
-  # Cognee's web page. Open http://127.0.0.1:3000 in your browser.
+  # Cognee's web page. Open http://127.0.0.1:8002 in your browser.
   frontend:
     image: ${COGNEE_UI_IMAGE:-cognee/cognee-ui:latest}
     container_name: hermes-cognee-ui
@@ -49,7 +51,7 @@ services:
       # The browser calls the API directly, so this is the address the browser uses.
       COGNEE_BACKEND_URL: http://127.0.0.1:8000
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:8002:3000"
     depends_on:
       cognee:
         condition: service_healthy
@@ -79,6 +81,9 @@ services:
       - cognee_storage:/cognee-storage
     ports:
       - "127.0.0.1:8001:8000"
+    depends_on:
+      cognee:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 5).close()"]
       interval: 30s
