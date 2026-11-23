@@ -1,0 +1,84 @@
+# Hermes + Cognee. One folder, one compose file, two services.
+#
+#   cognee-mcp   Shared memory: Cognee's own MCP server (remember, recall, forget)
+#   hermes       Hermes Agent, official image. Its API runs on 127.0.0.1:8642
+#
+# Memory: Hermes reads and writes Cognee through MCP (see README.md, step 4).
+#
+# Start:  docker compose up -d --wait
+# Check:  docker compose ps
+
+name: hermes-stack
+
+services:
+  cognee-mcp:
+    image: ${COGNEE_MCP_IMAGE:-cognee/cognee-mcp:latest}
+    container_name: hermes-cognee-mcp
+    restart: unless-stopped
+    stop_grace_period: 15s
+    env_file:
+      - .env
+    environment:
+      TRANSPORT_MODE: http
+      HTTP_PORT: "8000"
+      # Host names this server accepts. "cognee-mcp" lets Hermes call it inside
+      # the compose network. localhost and 127.0.0.1 let this PC call it.
+      MCP_ALLOWED_HOSTS: "cognee-mcp:*,localhost:*,127.0.0.1:*"
+      # Single-user, private setup. Both flags must be false together.
+      REQUIRE_AUTHENTICATION: "false"
+      ENABLE_BACKEND_ACCESS_CONTROL: "false"
+      SYSTEM_ROOT_DIRECTORY: /cognee-storage/system
+      DATA_ROOT_DIRECTORY: /cognee-storage/data
+    volumes:
+      # Shared memory. Survives `docker compose down` (not `down -v`).
+      - cognee_storage:/cognee-storage
+    ports:
+      - "127.0.0.1:8001:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+  hermes:
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
+    container_name: hermes-agent
+    restart: unless-stopped
+    command: ["gateway", "run"]
+    environment:
+      API_SERVER_ENABLED: "true"
+      # 0.0.0.0 is needed inside the container so the published port works.
+      # The host side is bound to 127.0.0.1, so only this PC can reach it.
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_PORT: "8642"
+      API_SERVER_KEY: ${HERMES_API_KEY:?Set HERMES_API_KEY in the .env file first}
+      # Key for Hermes' "nvidia" provider (NVIDIA NIM). Set it in .env.
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      # Web dashboard (open http://127.0.0.1:9119). It requires a login, because it
+      # listens on all interfaces inside the container. Set the values in .env.
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_PORT: "9119"
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_USERNAME:?Set HERMES_DASHBOARD_USERNAME in the .env file first}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${HERMES_DASHBOARD_PASSWORD:?Set HERMES_DASHBOARD_PASSWORD in the .env file first}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_SECRET:?Set HERMES_DASHBOARD_SECRET in the .env file first}
+    volumes:
+      # Hermes config, sessions, skills and its LLM settings. A Docker volume,
+      # not a Windows folder, because SQLite is unsafe on Windows bind mounts.
+      - hermes_data:/opt/data
+    ports:
+      - "127.0.0.1:8642:8642"
+      - "127.0.0.1:9119:9119"
+    depends_on:
+      cognee-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  cognee_storage:
+  hermes_data:
