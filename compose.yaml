@@ -11,6 +11,49 @@
 name: hermes-stack
 
 services:
+  # Cognee's full API. The web page (frontend) and the memory server both use it,
+  # so they share one memory. Its settings come from .env, like the memory server.
+  cognee:
+    image: ${COGNEE_IMAGE:-cognee/cognee:latest}
+    container_name: hermes-cognee
+    restart: unless-stopped
+    stop_grace_period: 15s
+    env_file:
+      - .env
+    environment:
+      ENV: local
+      BIND_ADDRESS: "0.0.0.0"
+      HTTP_PORT: "8000"
+      # Single-user, private setup. Both flags must be false together.
+      REQUIRE_AUTHENTICATION: "false"
+      ENABLE_BACKEND_ACCESS_CONTROL: "false"
+      SYSTEM_ROOT_DIRECTORY: /cognee-storage/system
+      DATA_ROOT_DIRECTORY: /cognee-storage/data
+    volumes:
+      - cognee_api_storage:/cognee-storage
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+
+  # Cognee's web page. Open http://127.0.0.1:3000 in your browser.
+  frontend:
+    image: ${COGNEE_UI_IMAGE:-cognee/cognee-ui:latest}
+    container_name: hermes-cognee-ui
+    restart: unless-stopped
+    environment:
+      # The browser calls the API directly, so this is the address the browser uses.
+      COGNEE_BACKEND_URL: http://127.0.0.1:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      cognee:
+        condition: service_healthy
+
   cognee-mcp:
     image: ${COGNEE_MCP_IMAGE:-cognee/cognee-mcp:latest}
     container_name: hermes-cognee-mcp
@@ -29,6 +72,8 @@ services:
       ENABLE_BACKEND_ACCESS_CONTROL: "false"
       SYSTEM_ROOT_DIRECTORY: /cognee-storage/system
       DATA_ROOT_DIRECTORY: /cognee-storage/data
+      # Use the Cognee API above, so this memory server and the web page share one memory.
+      API_URL: http://cognee:8000
     volumes:
       # Shared memory. Survives `docker compose down` (not `down -v`).
       - cognee_storage:/cognee-storage
@@ -81,4 +126,5 @@ services:
 
 volumes:
   cognee_storage:
+  cognee_api_storage:
   hermes_data:
