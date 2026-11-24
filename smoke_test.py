@@ -1,7 +1,7 @@
-"""Checks for the Hermes + Cognee stack. Run from this folder while the stack is up.
+"""Checks for the Hermes + Hindsight stack. Run from this folder while the stack is up.
 
-    python smoke_test.py            connections: memory tools, Hermes health and key
-    python smoke_test.py --memory   also save a marker with remember and find it with recall
+    python smoke_test.py            connections: Hindsight tools, Hermes health and key
+    python smoke_test.py --memory   also save a marker with retain and find it with recall
     python smoke_test.py --chat     also send one request to Hermes
 
 Needs: pip install mcp httpx   (once, on this PC)
@@ -20,10 +20,9 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-MEMORY_URL = os.environ.get("MEMORY_URL", "http://127.0.0.1:8001/mcp")
+MEMORY_URL = os.environ.get("MEMORY_URL", "http://127.0.0.1:8888/mcp/hermes/")
 HERMES_BASE = os.environ.get("HERMES_BASE", "http://127.0.0.1:8642")
-MEMORY_TOOLS = {"remember", "recall", "forget"}
-DATASET = "hermes_shared"
+MEMORY_TOOLS = {"retain", "recall"}
 
 
 def read_env_value(name: str) -> str:
@@ -60,10 +59,15 @@ def result_text(result) -> str:
     return "\n".join(part.text for part in result.content if getattr(part, "type", None) == "text")
 
 
-async def call(session: ClientSession, name: str, arguments: dict) -> tuple[bool, str]:
-    result = await session.call_tool(name, arguments)
-    text = result_text(result)
-    return (not result.isError and not text.startswith("Error")), text
+def text_arg(tool, value: str) -> dict:
+    """Build the arguments for a tool from its own schema: the first required text field gets the value."""
+    schema = getattr(tool, "inputSchema", None) or {}
+    props = schema.get("properties", {}) or {}
+    required = schema.get("required", []) or []
+    names = [n for n in required if (props.get(n) or {}).get("type") == "string"] or [
+        n for n, p in props.items() if (p or {}).get("type") == "string"
+    ]
+    return {names[0] if names else "content": value}
 
 
 async def check_memory(report: Report, deep: bool) -> None:
@@ -71,27 +75,29 @@ async def check_memory(report: Report, deep: bool) -> None:
         async with streamablehttp_client(MEMORY_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                names = {tool.name for tool in (await session.list_tools()).tools}
-                missing = MEMORY_TOOLS - names
+                tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+                missing = MEMORY_TOOLS - set(tools)
                 if missing:
-                    report.fail("shared memory tools", f"missing {sorted(missing)}")
+                    report.fail("Hindsight memory tools", f"missing {sorted(missing)}")
                 else:
-                    report.ok("shared memory tools", ", ".join(sorted(MEMORY_TOOLS)) + f"  ({MEMORY_URL})")
+                    report.ok("Hindsight memory tools", f"{len(tools)} tools  ({MEMORY_URL})")
 
-                if deep:
+                if deep and not missing:
                     marker = f"stack-smoke-{uuid.uuid4().hex[:12]}"
-                    ok, text = await call(session, "remember", {"data": f"Smoke test marker {marker}.", "dataset_name": DATASET})
-                    if not ok:
-                        report.fail("remember", text[:300])
+                    saved = await session.call_tool("retain", text_arg(tools["retain"], f"Smoke test marker {marker}."))
+                    saved_text = result_text(saved)
+                    if saved.isError or saved_text.startswith("Error"):
+                        report.fail("retain", saved_text[:300])
                     else:
-                        report.ok("remember", "saved")
-                        ok, found = await call(session, "recall", {"query": f"smoke test marker {marker}", "datasets": DATASET})
-                        if ok and marker in found:
+                        report.ok("retain", "saved")
+                        found = await session.call_tool("recall", text_arg(tools["recall"], f"smoke test marker {marker}"))
+                        found_text = result_text(found)
+                        if not found.isError and marker in found_text:
                             report.ok("recall round trip", "marker found")
                         else:
                             report.warn("recall round trip", "marker not found yet. Check again after indexing finishes.")
     except Exception as exc:  # noqa: BLE001 - any connection problem is a reported check
-        report.fail("shared memory connection", f"{type(exc).__name__}: {exc}")
+        report.fail("Hindsight connection", f"{type(exc).__name__}: {exc}")
 
 
 async def check_hermes(report: Report, chat: bool) -> None:
@@ -140,7 +146,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--memory", action="store_true", help="save a marker with remember and find it with recall")
+    parser.add_argument("--memory", action="store_true", help="save a marker with retain and find it with recall")
     parser.add_argument("--chat", action="store_true", help="send one request to Hermes")
     return parser.parse_args(argv)
 

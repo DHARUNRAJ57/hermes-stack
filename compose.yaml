@@ -1,9 +1,9 @@
-# Hermes + Cognee. One folder, one compose file, two services.
+# Hermes + Hindsight. One folder, one compose file, two services.
 #
-#   cognee-mcp   Shared memory: Cognee's own MCP server (remember, recall, forget)
+#   hindsight    Shared memory: Hindsight (MCP at /mcp/<bank>/; UI on 127.0.0.1:9999)
 #   hermes       Hermes Agent, official image. Its API runs on 127.0.0.1:8642
 #
-# Memory: Hermes reads and writes Cognee through MCP (see README.md, step 4).
+# Memory: Hermes reads and writes Hindsight through MCP (see README.md, step 4).
 #
 # Start:  docker compose up -d --wait
 # Check:  docker compose ps
@@ -11,82 +11,25 @@
 name: hermes-stack
 
 services:
-  # Cognee's full API. The web page (frontend) and the memory server both use it,
-  # so they share one memory. Its settings come from .env, like the memory server.
-  cognee:
-    image: ${COGNEE_IMAGE:-cognee/cognee:latest}
-    container_name: hermes-cognee
+  # Hindsight: long-term memory. Its LLM is NVIDIA NIM, through Hindsight's
+  # OpenAI-compatible provider with NVIDIA's endpoint.
+  hindsight:
+    image: ${HINDSIGHT_IMAGE:-ghcr.io/vectorize-io/hindsight:latest}
+    container_name: hermes-hindsight
     restart: unless-stopped
-    stop_grace_period: 15s
-    env_file:
-      - .env
     environment:
-      ENV: local
-      BIND_ADDRESS: "0.0.0.0"
-      # Lets the web page on port 8002 call this API from the browser.
-      HTTP_PORT: "8000"
-      # Single-user, private setup. Both flags must be false together.
-      SYSTEM_ROOT_DIRECTORY: /cognee-storage/system
-      DATA_ROOT_DIRECTORY: /cognee-storage/data
+      HINDSIGHT_API_LLM_PROVIDER: openai
+      HINDSIGHT_API_LLM_BASE_URL: https://integrate.api.nvidia.com/v1
+      HINDSIGHT_API_LLM_MODEL: nvidia/nemotron-3-ultra-550b-a55b
+      HINDSIGHT_API_LLM_API_KEY: ${NVIDIA_API_KEY:?Set NVIDIA_API_KEY in the .env file first}
+      # Login for the web UI on port 9999: the sign-in page asks for this shared key.
+      HINDSIGHT_CP_ACCESS_KEY: ${HINDSIGHT_CP_ACCESS_KEY:?Set HINDSIGHT_CP_ACCESS_KEY in the .env file first}
     volumes:
-      - cognee_api_storage:/cognee-storage
+      # Memory data (embedded database). Survives `docker compose down` (not `down -v`).
+      - hindsight_data:/home/hindsight/.pg0
     ports:
-      - "127.0.0.1:8000:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 180s
-
-  # Cognee's web page. Open http://127.0.0.1:8002 in your browser.
-  frontend:
-    image: ${COGNEE_UI_IMAGE:-cognee/cognee-ui:latest}
-    container_name: hermes-cognee-ui
-    restart: unless-stopped
-    environment:
-      # The browser calls the API directly, so this is the address the browser uses.
-      COGNEE_BACKEND_URL: https://memory-api.aiend.tech
-    ports:
-      - "127.0.0.1:8002:3000"
-    depends_on:
-      cognee:
-        condition: service_healthy
-
-  cognee-mcp:
-    image: ${COGNEE_MCP_IMAGE:-cognee/cognee-mcp:latest}
-    container_name: hermes-cognee-mcp
-    restart: unless-stopped
-    stop_grace_period: 15s
-    env_file:
-      - .env
-    environment:
-      TRANSPORT_MODE: http
-      HTTP_PORT: "8000"
-      # Host names this server accepts. "cognee-mcp" lets Hermes call it inside
-      # the compose network. localhost and 127.0.0.1 let this PC call it.
-      MCP_ALLOWED_HOSTS: "cognee-mcp:*,localhost:*,127.0.0.1:*"
-      # Single-user, private setup. Both flags must be false together.
-      REQUIRE_AUTHENTICATION: "false"
-      ENABLE_BACKEND_ACCESS_CONTROL: "false"
-      SYSTEM_ROOT_DIRECTORY: /cognee-storage/system
-      DATA_ROOT_DIRECTORY: /cognee-storage/data
-      # Use the Cognee API above, so this memory server and the web page share one memory.
-      API_URL: http://cognee:8000
-    volumes:
-      # Shared memory. Survives `docker compose down` (not `down -v`).
-      - cognee_storage:/cognee-storage
-    ports:
-      - "127.0.0.1:8001:8000"
-    depends_on:
-      cognee:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), 5).close()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 180s
+      - "127.0.0.1:8888:8888"
+      - "127.0.0.1:9999:9999"
 
   hermes:
     image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
@@ -96,7 +39,7 @@ services:
     environment:
       API_SERVER_ENABLED: "true"
       # 0.0.0.0 is needed inside the container so the published port works.
-      # The host side is bound to 127.0.0.1, so only this PC can reach it.
+      # The host side is bound to 127.0.0.1 below, so only this PC can reach it.
       API_SERVER_HOST: "0.0.0.0"
       API_SERVER_PORT: "8642"
       API_SERVER_KEY: ${HERMES_API_KEY:?Set HERMES_API_KEY in the .env file first}
@@ -116,9 +59,6 @@ services:
     ports:
       - "127.0.0.1:8642:8642"
       - "127.0.0.1:9119:9119"
-    depends_on:
-      cognee-mcp:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8642/health', timeout=5)"]
       interval: 30s
@@ -127,6 +67,5 @@ services:
       start_period: 60s
 
 volumes:
-  cognee_storage:
-  cognee_api_storage:
+  hindsight_data:
   hermes_data:
