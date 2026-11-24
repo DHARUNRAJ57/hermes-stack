@@ -20,7 +20,7 @@ services:
     environment:
       HINDSIGHT_API_LLM_PROVIDER: openai
       HINDSIGHT_API_LLM_BASE_URL: https://integrate.api.nvidia.com/v1
-      HINDSIGHT_API_LLM_MODEL: nvidia/nemotron-3-ultra-550b-a55b
+      HINDSIGHT_API_LLM_MODEL: nvidia/nemotron-3.5-super-vl-120b-a12b
       HINDSIGHT_API_LLM_API_KEY: ${NVIDIA_API_KEY:?Set NVIDIA_API_KEY in the .env file first}
       # Login for the web UI on port 9999: the sign-in page asks for this shared key.
       HINDSIGHT_CP_ACCESS_KEY: ${HINDSIGHT_CP_ACCESS_KEY:?Set HINDSIGHT_CP_ACCESS_KEY in the .env file first}

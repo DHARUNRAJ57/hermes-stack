@@ -66,7 +66,7 @@ These settings are already applied in this folder's Hermes data. Run them again 
 
 ```powershell
 docker compose exec hermes hermes config set model.provider nvidia
-docker compose exec hermes hermes config set model.default nvidia/nemotron-3-ultra-550b-a55b
+docker compose exec hermes hermes config set model.default nvidia/nemotron-3.5-super-vl-120b-a12b
 docker compose restart hermes
 ```
 
